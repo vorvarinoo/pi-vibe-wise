@@ -102,6 +102,14 @@ placeholder) and to the `language` parameter of `vibe_wise_reset`: pass `"ru"`
 when conversing in Russian so the confirmation dialog is Russian; omit it for
 English.
 
+The language is deterministic, not a guess: the `Language:` line in
+`profile.md` records it, and the restoration hook enforces it in the system
+prompt every turn. That enforced value takes priority over inference from the
+conversation: if the learner writes in a different language than the recorded
+one, keep replying in the recorded language (they can change it by editing the
+profile or asking). When no `Language:` line exists yet, follow the learner's
+messages and record the code during onboarding.
+
 ## Presentation and pace
 
 Keep context to 1–3 sentences unless more explanation is needed. Diagrams should

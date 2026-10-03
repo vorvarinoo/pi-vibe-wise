@@ -12,13 +12,20 @@
  *   which would persist into the session and grow the context).
  */
 import path from "node:path";
-import { profileIsActive } from "../lib/profile";
+import {
+	normalizeLanguageCode,
+	profileIsActive,
+	readProfileFacts,
+	type ProfileFacts,
+} from "../lib/profile";
 import { buildPointer } from "../lib/pointer";
 import { stateDirectory } from "../lib/state-directory";
 
 /** Resolved state facts cached between `session_start` and the agent turns. */
 export interface StateCache {
 	stateDir: string;
+	/** Whitelisted learning language, or null (no enforcement line). */
+	language: string | null;
 }
 
 /** Dependencies of the handlers, overridable for tests. */
@@ -29,10 +36,28 @@ export interface HandlerDeps {
 	resolveState?: (cwd: string) => Promise<string | null>;
 	/** How the profile is judged active (defaults to the §6.2 port). */
 	isActive?: (profilePath: string) => Promise<boolean>;
+	/** Single-read profile facts (defaults to the deterministic-language port). */
+	profileFacts?: (profilePath: string) => Promise<ProfileFacts>;
+	/** Environment for the language override (defaults to process.env). */
+	env?: NodeJS.ProcessEnv;
 }
 
 export function learnSkillPath(pluginRoot: string): string {
 	return path.join(pluginRoot, "skills", "vibe-wise-learn", "SKILL.md");
+}
+
+/**
+ * Resolve the learning language: the `VIBE_WISE_LANGUAGE` env override wins
+ * (when it holds a whitelisted code); otherwise the profile's `Language:`
+ * value is used. Anything invalid at either level is ignored (no garbage is
+ * ever injected) — the caller just gets null and the pointer stays default.
+ */
+export function resolveLanguage(
+	env: NodeJS.ProcessEnv,
+	profileLanguage: string | null,
+): string | null {
+	const override = normalizeLanguageCode(env.VIBE_WISE_LANGUAGE);
+	return override ?? profileLanguage;
 }
 
 /**
@@ -45,6 +70,8 @@ export function createSessionStartHandler(deps: HandlerDeps) {
 	const cache: { current: StateCache | null } = { current: null };
 	const resolveState = deps.resolveState ?? stateDirectory;
 	const isActive = deps.isActive ?? profileIsActive;
+	const factsOf = deps.profileFacts ?? readProfileFacts;
+	const env = deps.env ?? process.env;
 	return {
 		cache,
 		async handle(
@@ -55,8 +82,17 @@ export function createSessionStartHandler(deps: HandlerDeps) {
 			cache.current = null;
 			try {
 				const state = await resolveState(ctx.cwd);
-				if (state && (await isActive(path.join(state, "profile.md")))) {
-					cache.current = { stateDir: state };
+				if (!state) return;
+				const profilePath = path.join(state, "profile.md");
+				// Single read serves both activation and language (no double scan); an
+				// injected isActive seam still wins over the derived fact.
+				const facts = await factsOf(profilePath);
+				const active = deps.isActive ? await isActive(profilePath) : facts.active;
+				if (active) {
+					cache.current = {
+						stateDir: state,
+						language: resolveLanguage(env, facts.language),
+					};
 				}
 			} catch {
 				cache.current = null; // [P10d] errors never break the session
@@ -86,13 +122,17 @@ export function createBeforeAgentStartHandler(
 					pluginRoot: deps.pluginRoot,
 					skillPath,
 					stateDir,
+					language: cache.current.language,
 				});
 				if (debug && process.env.VIBE_WISE_DEBUG_ENTRY === "1") {
 					// Observability spike (PLAN §7.5): the injected systemPrompt is not
 					// visible in the session JSON stream, so expose it as a custom entry.
 					debug.appendEntry("vibe-wise-injected", {
 						stateDir,
-						pointerLength: pointer.length,
+						// Bytes, not string .length: the documented ≤ 1100 bound is measured with
+						// Buffer.byteLength, and the language line contains a multi-byte dash
+						// (42 code units vs 44 bytes), so a char count here would mislead.
+						pointerLength: Buffer.byteLength(pointer, "utf-8"),
 					});
 				}
 				return { systemPrompt: `${event.systemPrompt}\n\n${pointer}` };

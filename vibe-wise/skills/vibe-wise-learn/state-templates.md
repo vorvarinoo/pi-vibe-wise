@@ -2,8 +2,11 @@
 
 Create only these three files in the chosen project's `.vibe-wise/`, or its existing
 legacy `.sensible-vibes/` when resuming. Use the directory selected by SKILL.md.
-Replace bracketed values with actual evidence or “Not specified.” Keep the two
-status lines unformatted and near the top; the restoration hook reads them.
+Replace bracketed values with actual evidence or “Not specified.” Keep the
+status lines and the `Language:` line unformatted and near the top; the
+restoration hook reads them. `Language:` is the two-letter code of the language
+chosen for teaching (e.g. `en` or `ru`); set it during onboarding from the
+learner's messages, or ask them when no signal exists.
 Do not replace existing state with a fresh template.
 
 ## profile.md
@@ -13,6 +16,7 @@ Do not replace existing state with a fresh template.
 
 Learning mode: active
 Onboarding: complete
+Language: [en / ru]
 
 ## Project
 Situation: [New / Existing / Known]

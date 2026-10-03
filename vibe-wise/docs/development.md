@@ -151,6 +151,29 @@ Remaining skips are platform- or environment-limited, not unimplemented:
   placeholder optional, removing the hardcoded English `"Your answer"/"Type something…"`.
   `lib/reset.ts` error texts remain verbatim English on purpose: they are the exact-port
   error contract (asserted in tests) and are model-facing diagnostics, not user UI.
+- **Deterministic learning language (deliberate pointer divergence).** The injected
+  restore pointer is no longer a strict 1:1 port when a learning language is
+  established: a single short enforcement line (fixed per code, ≤ 60 bytes) is
+  appended — `Learning language: ru — reply in Russian.` / `… en — reply in English.` —
+  so the language is enforced at system-prompt level every turn instead of relying on
+  the skill prose read once. Without a language (or with any non-whitelisted value)
+  the pointer is byte-identical to the 1:1 port (asserted). The language lives as a
+  `Language: <code>` line in `profile.md` (parsed by `profileLanguage` in
+  `lib/profile.ts`: first full-line match, whitelist `{en, ru}`, anything else → null,
+  so note prose can never reach the system prompt) and can be overridden by the
+  `VIBE_WISE_LANGUAGE` env var (same whitelist; invalid values are ignored; the profile
+  wins when the variable is unset or invalid). The `FRESH` reset templates in
+  `lib/reset.ts` are deliberately untouched — they stay byte-identical to the original
+  `reset.py` (asserted); a reset restarts onboarding, which re-asks or re-records the
+  language. Pointer size stays note-independent (Δlength = 0 with and without a
+  language line); measured on the test paths (skillPath under the repo root plus
+  stateDir `D:/proj/.vibe-wise`): **962 bytes** without a language line and
+  **1006** with `en`/`ru` — the line costs a fixed 44 bytes, so the total stays
+  inside the documented ≤ 1100 bound. (Earlier figures in this file — "888/932"
+  and "891" — mixed different path/definition bases and have been dropped.) Skill prose updated to match: `state-templates.md` gained the `Language:`
+  template line, `onboarding.md` asks the language first when no signal exists
+  (option labels each in their own language), and `behavior.md` gives the
+  recorded/enforced value priority over conversation inference.
 
 ## M4 runtime facts (pi 0.84.1, verified in dist)
 
@@ -190,14 +213,18 @@ extension appends a `vibe-wise-injected` custom entry under
 # fixture with .vibe-wise/profile.md = "Learning mode: active\nOnboarding: complete\n"
 cd /tmp/vw-active && VIBE_WISE_DEBUG_ENTRY=1 timeout 180 \
   pi -p -a --mode json -e <abs>/vibe-wise/extensions/index.ts "reply with the single word ok"
-# => entry_appended {customType: "vibe-wise-injected", data: {stateDir: ...\\.vibe-wise, pointerLength: 999}}
+# => entry_appended {customType: "vibe-wise-injected", data: {stateDir: ...\\.vibe-wise, pointerLength: 997}}
 
 # same fixture but profile = "Learning mode: paused\n..."  =>  0 matches
 ```
 
 Result (re-verified by the parent, not only by the worker): active fixture → **exactly 1**
-`entry_appended` with `pointerLength: 999` (the value tracks the fixture path length;
-1007 was measured for a longer temp path); paused fixture → **0** hits; without state, none.
+`entry_appended` with `pointerLength: 997`; paused fixture → **0** hits; without state, none.
+`pointerLength` is `Buffer.byteLength(pointer, "utf-8")` — the same metric as the
+≤ 1100 bound below (a char count would under-report by 2 bytes because the language
+line contains a multi-byte dash). The value tracks the fixture path length, so a
+longer temp path adds ~30–50; adding a language line adds a fixed 44 bytes
+(997 → 1041 with `VIBE_WISE_LANGUAGE=ru`, measured on this fixture).
 
 **Caveat — the model stage intermittently hangs here.** `opencode-go` sometimes never
 returns from the provider call (the run then ends via `timeout`, `rc=124`), and sometimes
@@ -342,7 +369,8 @@ needed — this is now pinned by a test, not just by a comment.
 
 - **active** fixture → on success: exactly **one** `entry_appended` with
   `customType === "vibe-wise-injected"`, `stateDir` pointing at the fixture's
-  `.vibe-wise`, and `800 < pointerLength ≤ 1100` (measured 999 for short fixture paths);
+  `.vibe-wise`, and `800 < pointerLength ≤ 1100` (measured 997 for a short fixture path;
+  the field is a byte count, same metric as the bound);
 - **paused** fixture → zero such entries;
 - per-run kill at 90 s (cold start measured > 70 s, warm ~17 s) → on hang the test calls
   `skipCtx.skip("provider did not respond within 90s (run killed); …")` — a loud,

@@ -16,7 +16,8 @@ An ordinary build request in this mode retains that loop;
 only an explicit request to skip or pause bypasses it.
 Do not switch to a subagent or require manual coding by default.
 Ask questions and write explanations, checkpoint headings, and button labels
-in the learner's language (see behavior.md).
+in the learner's language (see behavior.md). The language is recorded as a
+`Language:` code in `profile.md` and enforced in the system prompt every turn.
 
 Use the Read tool for plugin guides instead of printing them with Bash `cat`.
 Use Glob to discover optional learner-state files before reading them. A missing

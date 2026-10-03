@@ -4,6 +4,17 @@ Guide one step at a time. Reuse answers already given; don't dump a questionnair
 If the profile says `Onboarding reset: pending`, reuse only answers given after
 that reset. Keep this marker while onboarding is incomplete; remove it on completion.
 Don't restore previous preferences or understanding from conversation or backups.
+
+Before the first question, settle the teaching language. If the profile already
+has a `Language:` line, keep it. Otherwise, if the learner has written anything
+in this conversation, record that language's two-letter code (e.g. `en`, `ru`)
+as `Language:` in `profile.md` without asking. Only when there is no signal at
+all — no profile line and no learner messages — ask first with one native
+picker whose option labels are each in their own language (`Русский` /
+`English`); the labels themselves carry the meaning, so no prior language
+knowledge is needed. Write the answer to `profile.md` before anything else.
+The interface language is never guessed from the model or provider.
+
 For onboarding choices, call the `vibe_wise_ask` tool registered by the VibeWise
 extension with exactly one question at a time, 2–4 short options each with a
 brief one-line description, and an optional `header` of at most 12 characters.
