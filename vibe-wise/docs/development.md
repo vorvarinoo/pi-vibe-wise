@@ -9,9 +9,9 @@
 | --- | --- |
 | M1 Scaffolding & infra | done |
 | M2 State library (`lib/`) | done — reviewed, mandatory fixes applied |
-| M3 Skills (prose port) | done |
-| M4 Extension boot + injection | done — spike verified (entry_appended active/paused) |
-| M5 Reset tool (full flow) | partially done — the tool is fully wired in M4 (see deviations); M5 = integration verification |
+| M3 Skills (prose port) | done — reviewed, no drift found |
+| M4 Extension boot + injection | done — reviewed; one blocker fixed (see M3+M4 review log) |
+| M5 Reset flow integration verification | not started |
 | M6 Compaction survival + observability | not started |
 | M7 Docs, README, install prep | not started |
 
@@ -88,11 +88,11 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 ## Test coverage
 
-`npx vitest run` on Windows: **72 passed, 3 skipped** (75 total) — `lib/` behaviour
+`npx vitest run` on Windows: **73 passed, 3 skipped** (76 total) — `lib/` behaviour
 (`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2) plus the
-extension layer (`extension.test.ts` 22: handlers with fake ctx, tool_result
+extension layer (`extension.test.ts` 26: handlers with fake ctx, tool_result
 marker, and the three tools' fallback/cancel/confirm/no-write semantics).
-`buildPointer` measures **1007 bytes** from the real package root (bound: ≤ 1100).
+`buildPointer` measures **962 bytes** from the package root (bound: ≤ 1100).
 
 Remaining skips are platform-limited, not unimplemented:
 
@@ -166,16 +166,74 @@ extension appends a `vibe-wise-injected` custom entry under
 
 ```bash
 # fixture with .vibe-wise/profile.md = "Learning mode: active\nOnboarding: complete\n"
-cd /tmp/vw-fixture-active && VIBE_WISE_DEBUG_ENTRY=1 \
+cd /tmp/vw-active && VIBE_WISE_DEBUG_ENTRY=1 timeout 180 \
   pi -p -a --mode json -e <abs>/vibe-wise/extensions/index.ts "reply with the single word ok"
-# => entry_appended {customType: "vibe-wise-injected", data: {stateDir: ...\\.vibe-wise, pointerLength: 1007}}
+# => entry_appended {customType: "vibe-wise-injected", data: {stateDir: ...\\.vibe-wise, pointerLength: 999}}
 
 # same fixture but profile = "Learning mode: paused\n..."  =>  0 matches
 ```
 
-Result: active fixture → **1** `entry_appended`; paused fixture → **0**; both
-runs exit 0 in ~8 s with empty stderr. Without the extension loaded, or with
-no state directory, no entry is emitted either.
+Result (re-verified by the parent, not only by the worker): active fixture → **exactly 1**
+`entry_appended` with `pointerLength: 999` (the value tracks the fixture path length;
+1007 was measured for a longer temp path); paused fixture → **0** hits; without state, none.
+
+**Caveat — the model stage intermittently hangs here.** `opencode-go` sometimes never
+returns from the provider call (the run then ends via `timeout`, `rc=124`), and sometimes
+answers normally: a later re-run finished with **rc=0, empty stderr, 1 injection**. So the
+spike is usable, but do not script it as a hard CI gate — retry on `rc=124`. The
+mechanism evidence is unaffected either way, because `before_agent_start` (and therefore
+the debug entry) runs *before* the provider request. What still needs a human eye is the
+second half — that the model *acts on* the pointer — which stays a manual TUI step (M5/M6).
+
+## Review log — M3+M4
+
+Verdict: **accepted with mandatory fixes** — one blocker, fixed here.
+
+**Blocker: `vibe_wise_reset` contradicted its own contract.** The first implementation
+collapsed the two-step flow: a call *without* `confirmation` (documented as a read-only
+preview) showed the confirm dialog and committed in one go, while a call *with*
+`confirmation` committed **silently** with no dialog at all. Since the fingerprint is a
+deterministic sha256 over readable note bytes, the second path meant "reset without any
+consent" — contradicting PLAN §4.4/§5.3, `reference.md`, `SKILL.md`, and the tool's own
+`description`.
+
+Fixed to the strictly two-call model:
+
+1. no `confirmation` → **read-only preview**: no dialog, no writes, `backups/` not even
+   created; returns the paths + fingerprint for the model to present in chat;
+2. `confirmation` → fingerprint re-checked *first* (stale token refused before any
+   dialog), then the tool's own `ctx.ui.confirm`; only explicit approval commits, Cancel
+   leaves every byte untouched.
+
+The mismatch message is now a single exported constant in `lib/reset.ts`
+(`FINGERPRINT_MISMATCH_MESSAGE`) so the tool and the ported helper cannot drift apart.
+`extensions/README.md` and `skills/vibe-wise-reset/reference.md` were updated to match.
+
+### Mutation coverage (verified locally, each mutant reverted afterwards)
+
+| Mutation | Result |
+| --- | --- |
+| `session_start` no longer drops the cache (stale pointer after `/resume`) | **caught** by the new cross-cwd test (this was the reviewer's coverage gap) |
+| preview branch disabled (fused preview → dialog + commit) | **caught** |
+| Cancel no longer blocks the commit | **caught** |
+| pointer injected while `paused` | caught (2 tests) |
+| profile read error rethrown instead of swallowed | caught |
+| `vibe_wise_ask` returns success instead of a fallback result without UI | caught |
+| `vibe_wise_reset` writes on disk when `hasUI === false` | caught |
+
+### Accepted deviations (reviewer assessed both as fine or better for v1)
+
+- `vibe_wise_reset` wired fully in M4 instead of stubbed — agreed, provided the consent
+  model above holds.
+- `vibe_wise_questionnaire` as a sequential `ui.select` loop instead of a
+  `ctx.ui.custom()` component — judged *better* for v1 (same UX, less bespoke surface).
+
+### Residual risk
+
+Real TUI interaction of the tools (`ui.select`/`ui.confirm` + the `tool_result` isError
+flip) is covered at unit level and against the 0.84.1 sources, but not end-to-end through
+a live model turn while this provider hangs. M5 must keep the manual TUI run (preview →
+confirm → commit → Cancel) as a required step.
 
 ## M3/M4 deviations from PLAN
 

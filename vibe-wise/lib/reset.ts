@@ -109,6 +109,13 @@ export function snapshotSync(
 }
 
 /**
+ * Exact message from the ported helper, reused by callers that must reject a
+ * stale confirmation before doing anything else (never reworded).
+ */
+export const FINGERPRINT_MISMATCH_MESSAGE =
+	"Target or notes changed. Preview and confirm again; nothing reset.";
+
+/**
  * Preview by default; reset only a confirmed snapshot of local learning notes.
  * Exact port of `reset()` from reset.py, including error message texts.
  */
@@ -127,9 +134,7 @@ export function resetNotes(
 		confirmation !== null &&
 		(Object.keys(notes).length === 0 || confirmation !== fingerprint)
 	) {
-		throw new Error(
-			"Target or notes changed. Preview and confirm again; nothing reset.",
-		);
+		throw new Error(FINGERPRINT_MISMATCH_MESSAGE);
 	}
 	if (Object.keys(notes).length === 0) {
 		return { status: "no_notes", cwd: resolvedCwd };

@@ -14,7 +14,7 @@ Pi 0.84.1 (`resolveExtensionEntries()` in `dist/core/package-manager.js`).
 | `tools/shared.ts` | Tool-result helpers. Non-error results set `details.vibeWiseIsError: false`; error-flavoured results set `true` and keep their details. |
 | `tools/vibe_wise_ask.ts` | Single-question picker (replacement for the original `AskUserQuestion`). |
 | `tools/vibe_wise_questionnaire.ts` | Bounded sequential multiple-choice batch for onboarding. |
-| `tools/vibe_wise_reset.ts` | Preview → tool-owned confirm → commit, wired to `lib/reset.ts`. |
+| `tools/vibe_wise_reset.ts` | Strictly two calls: read-only preview (no dialog, no writes) → commit call with the preview's fingerprint → tool-owned dialog → commit. Wired to `lib/reset.ts`. |
 
 ## Why the `tool_result` hook exists
 
@@ -45,3 +45,19 @@ The injected system prompt is not visible in the session JSON stream. With
 entry (`pi.appendEntry`) on every turn where the pointer was injected; visible
 in `--mode json` as an `entry_appended` event. Used by the M4 spike and manual
 compaction checks (PLAN §7.5).
+
+## Reset consent model
+
+`vibe_wise_reset` is deliberately **two separate calls**:
+
+1. without `confirmation` → read-only preview: no dialog, no disk writes, no
+   backup directory; returns `project`, `state`, `files`, `backup_parent`, and
+   the `confirmation` fingerprint. The model shows those paths to the user in
+   chat (`skills/vibe-wise-reset/SKILL.md` step 2).
+2. with that exact `confirmation` → the fingerprint is re-checked first (a
+   stale token is refused *before* the dialog), then the tool shows its own
+   `ctx.ui.confirm` dialog, and only explicit approval commits. Cancel leaves
+every byte untouched.
+
+Invocation of the skill or tool, silence, or an earlier tool approval is never
+consent. See `skills/vibe-wise-reset/reference.md` for the full contract.

@@ -15,6 +15,10 @@ Parameters (TypeBox-validated):
 
 ### Preview (omit `confirmation`)
 
+The preview is strictly read-only: it performs **no** confirmation dialog and
+**no** disk writes. `backups/` is not even created. The model is expected to
+show these paths to the user in chat before committing (see `SKILL.md`).
+
 Returns:
 
 - `status: "preview"` — with `project` (absolute project dir), `state` (absolute
@@ -26,10 +30,14 @@ The preview never writes anything.
 
 ### Commit (pass `confirmation`)
 
-The tool first shows its own confirmation dialog (`ctx.ui.confirm`): header
-`Reset`, message with the project/state paths and the backup location, options
-**Cancel** / **Reset learning**. Only `Reset learning` commits; Cancel leaves
-every byte untouched. Invocation of the skill or tool is never consent.
+The tool first re-checks the fingerprint: a stale token (or vanished notes) is
+refused with `Target or notes changed. Preview and confirm again; nothing reset.`
+**before** any dialog is shown.
+
+Only then does the tool show its own confirmation dialog (`ctx.ui.confirm`):
+header `Reset`, message with the project/state paths and the backup location.
+Only an explicit approval commits; Cancel leaves every byte untouched.
+Invocation of the skill or tool is never consent.
 
 On success the result carries `status: "reset"`, `backup` (absolute path of the
 timestamped backup directory), `project`, and `state`. Backup contents: the

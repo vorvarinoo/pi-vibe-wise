@@ -6,17 +6,15 @@
  * error swallowing, tool fallback/cancel/no-write semantics), not the
  * implementation's shape.
  */
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
 	existsSync,
-	mkdtempSync,
 	readFileSync,
 	readdirSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import {
 	createBeforeAgentStartHandler,
@@ -25,12 +23,7 @@ import {
 	learnSkillPath,
 } from "../extensions/handlers";
 import { buildPointer } from "../lib/pointer";
-import {
-	ORIGINAL_NOTES,
-	makeNotes,
-	makeProject,
-	makeTempRoot,
-} from "./helpers";
+import { makeNotes, makeProject, makeTempRoot } from "./helpers";
 
 const roots: string[] = [];
 
@@ -71,6 +64,27 @@ describe("session_start handler", () => {
 				path.join(project, ".vibe-wise"),
 			);
 		}
+	});
+
+	it("drops a stale cache when the cwd changes on the same instance (mutation: resume into another project)", async () => {
+		// Regression guard: without the cache reset, /resume into a different project
+		// would keep injecting the PREVIOUS project's pointer.
+		const active = freshProject("active");
+		const paused = freshProject("paused");
+		const session = createSessionStartHandler(makeDeps());
+		const before = createBeforeAgentStartHandler(makeDeps(), session.cache);
+
+		await session.handle({ reason: "startup" }, { cwd: active.project });
+		expect(
+			(await before.handle({ systemPrompt: "BASE" })) as {
+				systemPrompt: string;
+			},
+		).toHaveProperty("systemPrompt");
+
+		// Same handler instance, different project, paused profile.
+		await session.handle({ reason: "resume" }, { cwd: paused.project });
+		expect(session.cache.current).toBeNull();
+		await expect(before.handle({ systemPrompt: "BASE" })).resolves.toEqual({});
 	});
 
 	it("caches nothing when the profile is paused", async () => {
@@ -314,12 +328,14 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		} as never);
 		const tool = registered[0];
 
+		let confirmCalls = 0;
 		let confirmAnswer = true;
 		const ctx = {
 			hasUI: true,
 			cwd: project,
 			ui: {
 				confirm: async (_title: string, message: string) => {
+					confirmCalls += 1;
 					expect(message).toContain("Reset VibeWise learning");
 					expect(message).toContain(state);
 					return confirmAnswer;
@@ -327,28 +343,42 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 			},
 		} as never;
 
-		// Cancel first: nothing changes.
+		// Step 1 — preview: READ-ONLY, no dialog, no writes.
+		const preview = (await tool.execute("t0", {}, undefined, undefined, ctx)) as {
+			content: { text: string }[];
+			details: { status: string; confirmation: string };
+		};
+		expect(preview.details.status).toBe("preview");
+		expect(preview.details.confirmation).toEqual(expect.any(String));
+		expect(confirmCalls).toBe(0);
+		expect(readFileSync(path.join(state, "profile.md"))).toEqual(
+			originals["profile.md"],
+		);
+		expect(existsSync(path.join(state, "backups"))).toBe(false);
+
+		// Step 2a — commit call, user cancels: still no writes, no backup dir.
 		confirmAnswer = false;
 		const cancelled = (await tool.execute(
 			"t1",
-			{},
+			{ confirmation: preview.details.confirmation },
 			undefined,
 			undefined,
 			ctx,
 		)) as {
 			details: Record<string, unknown>;
 		};
+		expect(confirmCalls).toBe(1);
 		expect(cancelled.details.cancelled).toBe(true);
 		expect(readFileSync(path.join(state, "profile.md"))).toEqual(
 			originals["profile.md"],
 		);
 		expect(existsSync(path.join(state, "backups"))).toBe(false);
 
-		// Approve: fresh notes + backup with the original bytes.
+		// Step 2b — commit call, user approves: fresh notes + backup of the originals.
 		confirmAnswer = true;
 		const committed = (await tool.execute(
 			"t2",
-			{},
+			{ confirmation: preview.details.confirmation },
 			undefined,
 			undefined,
 			ctx,
@@ -356,6 +386,7 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 			content: { text: string }[];
 			details: { status: string; backup: string };
 		};
+		expect(confirmCalls).toBe(2);
 		expect(committed.details.status).toBe("reset");
 		expect(realpathSync(committed.details.backup)).toContain(
 			path.join(state, "backups"),
@@ -391,7 +422,6 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 			cwd: project,
 			ui: { confirm: async () => true },
 		} as never;
-
 		const { resetNotes } = await import("../lib/reset");
 		const preview = resetNotes(project);
 		// Mutate notes after the preview.
