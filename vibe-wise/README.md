@@ -17,16 +17,21 @@ repository:
 pi install /abs/path/to/vibe-wise
 
 # or project-local (writes .pi/settings.json in the current project)
-pi install ./vibe-wise -l
+pi install ./vibe-wise -l -a
 ```
 
 Verify and undo:
 
 ```bash
-pi list                  # shows the vibe-wise package
-pi config                # both skills listed under Skills
+pi list -a               # shows the vibe-wise package (project-local entries need -a)
+pi config                # both skills listed under Skills (interactive TUI)
 pi remove /abs/path/to/vibe-wise
 ```
+
+> Project-local installs require trust in non-interactive runs: without
+> `-a`/`--approve` pi refuses with `Project is not trusted. Use --approve to modify
+> local package config.`, and `pi list` hides project packages. In the interactive TUI
+> pi asks for that trust itself. Global installs and removals need no `-a`.
 
 ## Usage
 
@@ -44,7 +49,8 @@ instead of hanging or guessing an answer; teaching continues in chat.
 
 Pi's `session_start` cannot inject anything into the model. So the extension does
 something less obvious: on every turn, `before_agent_start` chains a
-**constant-size restore pointer** (paths plus topic headers — never excerpts) onto
+**constant-size restore pointer** (file paths plus reading instructions — never note
+content or a topic index) onto
 the system prompt. Consequences:
 
 - after `/compact` nothing is lost — the pointer is rebuilt on the next turn;
@@ -116,7 +122,8 @@ From the port's acceptance criteria, actually checked by the test suite:
 - read-only restore: `session_start` + `before_agent_start` never change the bytes
   of `.vibe-wise/*`;
 - local-only: `extensions/`, `lib/`, `skills/` use only `node:fs`, `node:path`,
-  `node:crypto`, `node:url`.
+  `node:crypto`, `node:url` (plus the local `typebox` schema builder in the tool
+  definitions) — no network calls, no telemetry, no LLM calls from plugin code.
 
 ## Attribution and license
 

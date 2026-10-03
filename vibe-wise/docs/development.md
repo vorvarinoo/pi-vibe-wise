@@ -93,7 +93,7 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 `npx vitest run` on Windows: **81 passed, 5 skipped** (86 total) — `lib/` behaviour
 (`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2), the
-extension layer (`extension.test.ts` 33: handlers with fake ctx, tool_result
+extension layer (`extension.test.ts` 34: handlers with fake ctx, tool_result
 marker, the three tools' fallback/cancel/confirm/no-write semantics, M5 reset
 cases, and the M6 compaction seam), and `integration.test.ts` (2 real headless
 pi runs, **opt-in**; skipped by default with an explicit reason).
