@@ -12,9 +12,9 @@ Pi 0.84.1 (`resolveExtensionEntries()` in `dist/core/package-manager.js`).
 | `index.ts` | Wiring only: registers the two session handlers, the `tool_result` marker hook, and the three tools. Resolves `PLUGIN_ROOT` from `import.meta.url`, never from the user's cwd. |
 | `handlers.ts` | Testable core. Imports nothing from pi, so `tests/extension.test.ts` drives it with fake events/ctx. Holds the session cache, pointer injection, and the `isError` marker. |
 | `tools/shared.ts` | Tool-result helpers. Non-error results set `details.vibeWiseIsError: false`; error-flavoured results set `true` and keep their details. |
-| `tools/vibe_wise_ask.ts` | Single-question picker (replacement for the original `AskUserQuestion`). |
+| `tools/vibe_wise_ask.ts` | Single-question picker (replacement for the original `AskUserQuestion`). The input title for `allowCustom` is the model-composed question; the placeholder is optional, so a non-English dialog gets no forced English strings. |
 | `tools/vibe_wise_questionnaire.ts` | Bounded sequential multiple-choice batch for onboarding. |
-| `tools/vibe_wise_reset.ts` | Strictly two calls: read-only preview (no dialog, no writes) → commit call with the preview's fingerprint → tool-owned dialog → commit. Wired to `lib/reset.ts`. |
+| `tools/vibe_wise_reset.ts` | Strictly two calls: read-only preview (no dialog, no writes) → commit call with the preview's fingerprint → tool-owned dialog → commit. Wired to `lib/reset.ts`. Dialog/preview/result texts are localized via the optional `language` parameter (`"ru"`/`"en"`, default `en`; unknown values fall back to English). |
 
 ## Why the `tool_result` hook exists
 

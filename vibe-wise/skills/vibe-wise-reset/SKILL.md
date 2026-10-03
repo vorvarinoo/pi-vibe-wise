@@ -22,9 +22,11 @@ stay intact.
    and that originals will be saved under that state's `backups/` directory.
    Confirm ONLY through the tool's own confirmation dialog (`ctx.ui.confirm`
    inside `vibe_wise_reset`): invoke the tool again with the preview's exact
-   `confirmation` value and let it ask the user — header `Reset`, one question,
-   options **Cancel** (keep learning notes) and **Reset learning** (back up
-   notes and restart onboarding). Ask whether to reset learning for the named
+   `confirmation` value and let it ask the user — header `Reset` (RU: `Сброс`),
+   one question, options **Cancel** (RU: **Отмена**; keep learning notes) and
+   **Reset learning** (RU: **Сбросить обучение**; back up notes and restart
+   onboarding). Pass `language: "ru"` when conversing in Russian so the dialog
+   itself is Russian; omit it for English. Ask whether to reset learning for the named
    project. Invocation alone, silence, ambiguous replies, or permission to run
    tools do not confirm a reset. Cancel makes no changes, including to learner
    notes.

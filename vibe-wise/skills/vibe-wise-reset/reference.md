@@ -12,6 +12,7 @@ Parameters (TypeBox-validated):
 | --- | --- | --- |
 | `cwd` | string, optional | Absolute project working directory. Defaults to the session `ctx.cwd`. Relative paths are rejected before resolution (matching the original). |
 | `confirmation` | string, optional | The exact `confirmation` fingerprint from a previous preview. Omit for a read-only preview; pass to commit. |
+| `language` | string, optional | Dialog language: `"ru"` or `"en"` (default). Only the tool-rendered dialog/result texts are localized; helper error texts stay verbatim English. Unknown values fall back to English. |
 
 ### Preview (omit `confirmation`)
 
@@ -35,9 +36,10 @@ refused with `Target or notes changed. Preview and confirm again; nothing reset.
 **before** any dialog is shown.
 
 Only then does the tool show its own confirmation dialog (`ctx.ui.confirm`):
-header `Reset`, message with the project/state paths and the backup location.
-Only an explicit approval commits; Cancel leaves every byte untouched.
-Invocation of the skill or tool is never consent.
+header `Reset` (RU: `Сброс`), message with the project/state paths and the
+backup location. Pass `language: "ru"` for a Russian dialog. Only an explicit
+approval commits; Cancel leaves every byte untouched. Invocation of the skill
+or tool is never consent.
 
 On success the result carries `status: "reset"`, `backup` (absolute path of the
 timestamped backup directory), `project`, and `state`. Backup contents: the

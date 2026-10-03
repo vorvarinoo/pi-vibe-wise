@@ -345,7 +345,7 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 			content: { text: string }[];
 			details: Record<string, unknown>;
 		};
-		expect(result.content[0].text).toContain("interactive");
+		expect(result.content[0].text).toContain("interactive session");
 		expect(result.details.vibeWiseIsError).toBe(true);
 		expect(result.details.noUi).toBe(true);
 		const after = readdirSync(state)
@@ -391,7 +391,7 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 			},
 		} as never;
 
-		// Step 1 — preview: READ-ONLY, no dialog, no writes.
+		// Step 1 — preview: READ-ONLY, no dialog, no writes. English by default.
 		const preview = (await tool.execute(
 			"t0",
 			{},
@@ -455,6 +455,115 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		expect(
 			readFileSync(path.join(committed.details.backup, "profile.md")),
 		).toEqual(originals["profile.md"]);
+	});
+
+	// --- Language-adaptive dialog ---
+
+	describe("language parameter", () => {
+		async function resetTool() {
+			const { registerVibeWiseReset } = await import(
+				"../extensions/tools/vibe_wise_reset"
+			);
+			const registered: Array<{
+				name: string;
+				execute: (...args: unknown[]) => Promise<unknown>;
+			}> = [];
+			registerVibeWiseReset({
+				registerTool: (t: never) => registered.push(t as never),
+			} as never);
+			return registered[0];
+		}
+
+		function ruCtx(project: string, answer = true) {
+			const dialogs: Array<{ title: string; message: string }> = [];
+			const ctx = {
+				hasUI: true,
+				cwd: project,
+				ui: {
+					confirm: async (title: string, message: string) => {
+						dialogs.push({ title, message });
+						return answer;
+					},
+				},
+			} as never;
+			return { ctx, dialogs };
+		}
+
+		it("language 'ru' renders the confirmation dialog in Russian with real paths", async () => {
+			const { project } = freshProject("active");
+			const state = path.join(project, ".vibe-wise");
+			const tool = await resetTool();
+			const { ctx, dialogs } = ruCtx(project);
+
+			const preview = (await tool.execute(
+				"t0",
+				{ language: "ru" },
+				undefined,
+				undefined,
+				ctx,
+			)) as { content: { text: string }[]; details: { confirmation: string } };
+			// Preview prose is Russian too, and still carries the real values.
+			expect(preview.content[0].text).toContain("Предпросмотр сброса");
+			expect(preview.content[0].text).toContain("Каталог состояния:");
+			expect(preview.content[0].text).toContain(state);
+
+			await tool.execute(
+				"t1",
+				{
+					language: "ru",
+					confirmation: preview.details.confirmation,
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
+			expect(dialogs).toHaveLength(1);
+			expect(dialogs[0].title).toBe("Сброс");
+			expect(dialogs[0].message).toContain("Сбросить обучение VibeWise для");
+			expect(dialogs[0].message).toContain(state);
+			expect(dialogs[0].message).toContain("backups");
+			// Pin the interpolated project slot exactly: `toContain(project)` alone is weak
+			// because the state path (`<project>/.vibe-wise`) already contains it.
+			expect(dialogs[0].message.split("\n")[0]).toBe(
+				`Сбросить обучение VibeWise для ${project}?`,
+			);
+		});
+
+		it("missing or unknown language falls back to English without failing", async () => {
+			// "toString"/"constructor" cover inherited object keys: a plain lookup returns
+			// those functions and breaks the fallback contract.
+			for (const language of [undefined, "fr", "RU", "toString", "constructor"]) {
+				const { project } = freshProject("active");
+				const tool = await resetTool();
+				const { ctx, dialogs } = ruCtx(project);
+
+				const params: Record<string, unknown> = {};
+				if (language !== undefined) params.language = language;
+				const preview = (await tool.execute(
+					"t0",
+					params,
+					undefined,
+					undefined,
+					ctx,
+				)) as {
+					content: { text: string }[];
+					details: { confirmation: string };
+				};
+				expect(preview.content[0].text).toContain("Reset preview for");
+				expect(preview.content[0].text).not.toContain("undefined");
+
+				await tool.execute(
+					"t1",
+					{ ...params, confirmation: preview.details.confirmation },
+					undefined,
+					undefined,
+					ctx,
+				);
+				expect(dialogs).toHaveLength(1);
+				expect(dialogs[0].title).toBe("Reset");
+				expect(dialogs[0].message).toContain("Reset VibeWise learning");
+			}
+		});
 	});
 
 	// --- M5: tool-level behavioural coverage (task items 1-6) ---
@@ -841,6 +950,44 @@ describe("vibe_wise_ask tool semantics", () => {
 		)) as { details: Record<string, unknown> };
 		expect(result.details.wasCustom).toBe(true);
 		expect(result.details.answer).toBe("my own answer");
+	});
+
+	it("allowCustom uses the question title and optional placeholder for ui.input", async () => {
+		const tool = await askTool();
+		const calls: Array<{ title: string; placeholder?: string }> = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				select: async (_t: string, options: string[]) => options[0],
+				input: async (title: string, placeholder?: string) => {
+					calls.push({ title, placeholder });
+					return undefined;
+				},
+			},
+		} as never;
+
+		// Placeholder passed through; the title is the model-composed question.
+		await tool.execute(
+			"t1",
+			{ ...params, allowCustom: true, placeholder: "Ваш вариант" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(calls).toEqual([
+			{ title: "Next step?", placeholder: "Ваш вариант" },
+		]);
+
+		// No placeholder: no hardcoded English placeholder leaks through.
+		await tool.execute(
+			"t2",
+			{ ...params, allowCustom: true },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(calls[1].title).toBe("Next step?");
+		expect(calls[1].placeholder).toBeUndefined();
 	});
 });
 

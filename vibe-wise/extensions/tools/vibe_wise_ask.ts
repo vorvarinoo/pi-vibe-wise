@@ -42,6 +42,13 @@ const AskParams = Type.Object({
 			description: "Optional context header, at most 12 characters.",
 		}),
 	),
+	placeholder: Type.Optional(
+		Type.String({
+			description:
+				"Optional input-field placeholder for the custom free-text answer (allowCustom). " +
+				"In the learner's language when provided.",
+		}),
+	),
 	allowCustom: Type.Optional(
 		Type.Boolean({
 			description: "Offer a free-text answer in addition to the options.",
@@ -99,7 +106,10 @@ export function registerVibeWiseAsk(pi: ExtensionAPI): void {
 			}
 
 			if (params.allowCustom === true) {
-				const custom = await ctx.ui.input("Your answer", "Type something…", {
+				// The input title reuses the question (already composed by the model in
+				// the learner's language); the placeholder is optional so no English
+				// string is forced on a non-English dialog.
+				const custom = await ctx.ui.input(params.title, params.placeholder, {
 					signal,
 				});
 				if (custom !== undefined && custom.trim() !== "") {

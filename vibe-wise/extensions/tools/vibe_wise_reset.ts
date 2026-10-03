@@ -38,7 +38,100 @@ const ResetParams = Type.Object({
 				"Omit for a read-only preview; pass it to commit the reset.",
 		}),
 	),
+	language: Type.Optional(
+		Type.String({
+			description:
+				"Language for the confirmation dialog: 'ru' or 'en'. Defaults to 'en'.",
+		}),
+	),
 });
+
+/**
+ * User-facing dialog strings, keyed by language. The dialog text is rendered by
+ * this tool (never model-authored): the model may only choose the language via
+ * the `language` parameter. Unknown/missing languages fall back to English.
+ * Error texts surfaced from `lib/reset.ts` stay verbatim English by design
+ * (exact port contract) — only the dialog and result prose are localized.
+ */
+const RESET_TEXTS: Record<
+	string,
+	{
+		dialogTitle: string;
+		dialogMessage: (
+			project: string,
+			state: string,
+			notes: string,
+			backup: string,
+		) => string;
+		preview: (
+			project: string,
+			state: string,
+			notes: string,
+			backup: string,
+			confirmation: string,
+		) => string;
+		noNotes: (cwd: string) => string;
+		cancelled: string;
+		committed: (backup: string) => string;
+	}
+> = {
+	en: {
+		dialogTitle: "Reset",
+		dialogMessage: (project, state, notes, backup) =>
+			`Reset VibeWise learning for ${project}?\n` +
+			`State directory: ${state}\n` +
+			`Notes that will reset: ${notes}\n` +
+			`Originals will be saved under ${backup}.`,
+		preview: (project, state, notes, backup, confirmation) =>
+			`Reset preview for ${project}:\n` +
+			`State directory: ${state}\n` +
+			`Notes that will reset: ${notes}\n` +
+			`Originals will be saved under ${backup}.\n` +
+			"Nothing was changed. To commit, call this tool again with " +
+			`confirmation: "${confirmation}" and the user's agreement.`,
+		noNotes: (cwd) =>
+			`No VibeWise learning notes found for ${cwd}. There is nothing to reset; ` +
+			"suggest starting the learn skill instead.",
+		cancelled:
+			"User cancelled. No changes were made, including to learner notes.",
+		committed: (backup) =>
+			`Learning notes reset. Backup: ${backup}. Now read the learn ` +
+			"skill and restart onboarding with fresh notes.",
+	},
+	ru: {
+		dialogTitle: "Сброс",
+		dialogMessage: (project, state, notes, backup) =>
+			`Сбросить обучение VibeWise для ${project}?\n` +
+			`Каталог состояния: ${state}\n` +
+			`Будут сброшены заметки: ${notes}\n` +
+			`Оригиналы будут сохранены в ${backup}.`,
+		preview: (project, state, notes, backup, confirmation) =>
+			`Предпросмотр сброса для ${project}:\n` +
+			`Каталог состояния: ${state}\n` +
+			`Будут сброшены заметки: ${notes}\n` +
+			`Оригиналы будут сохранены в ${backup}.\n` +
+			"Ничего не изменено. Чтобы применить сброс, вызовите этот инструмент ещё раз " +
+			`с confirmation: "${confirmation}" и с согласия пользователя.`,
+		noNotes: (cwd) =>
+			`Заметки обучения VibeWise для ${cwd} не найдены. Сбрасывать нечего; ` +
+			"предложите запустить скилл learn.",
+		cancelled:
+			"Пользователь отменил. Изменений не внесено, включая заметки обучения.",
+		committed: (backup) =>
+			`Заметки обучения сброшены. Резервная копия: ${backup}. Теперь прочитайте ` +
+			"скилл learn и начните онбординг заново с чистыми заметками.",
+	},
+};
+
+/** Unknown or missing `language` resolves to English without failing. */
+function textsFor(language: string | undefined): (typeof RESET_TEXTS)["en"] {
+	// `Object.hasOwn`, not a plain lookup: inherited keys such as "toString" or
+	// "constructor" are truthy and would slip past the "unknown => en" contract
+	// (they are not texts and would blow up when .dialogMessage is called).
+	return language !== undefined && Object.hasOwn(RESET_TEXTS, language)
+		? RESET_TEXTS[language]
+		: RESET_TEXTS.en;
+}
 
 export function registerVibeWiseReset(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -49,13 +142,14 @@ export function registerVibeWiseReset(pi: ExtensionAPI): void {
 			"Call with no `confirmation` for a read-only preview (no writes, no dialog), " +
 			"then call again with the preview's exact `confirmation` value to commit; " +
 			"the commit call asks the user to confirm and does nothing if they cancel. " +
+			"Pass `language: 'ru'` for a Russian confirmation dialog. " +
 			"Never resets application code.",
 		parameters: ResetParams,
 		executionMode: "sequential",
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const cwd = params.cwd ?? ctx.cwd;
-			const detailsBase = { cwd };
+			const detailsBase = { cwd, language: params.language ?? "en" };
 
 			if (!isInteractive(ctx)) {
 				// [P3/T3] Non-UI runs must not touch the disk at all. The preview is
@@ -69,6 +163,7 @@ export function registerVibeWiseReset(pi: ExtensionAPI): void {
 			}
 
 			const confirmation = params.confirmation ?? null;
+			const texts = textsFor(params.language);
 
 			try {
 				// Step 1 — read-only preview. `resetNotes(cwd, null)` never writes, and no
@@ -79,19 +174,19 @@ export function registerVibeWiseReset(pi: ExtensionAPI): void {
 
 				if (confirmation === null) {
 					if (preview.status === "no_notes") {
-						return okResult(
-							`No VibeWise learning notes found for ${cwd}. There is nothing to reset; ` +
-								"suggest starting the learn skill instead.",
-							{ ...detailsBase, status: preview.status },
-						);
+						return okResult(texts.noNotes(cwd), {
+							...detailsBase,
+							status: preview.status,
+						});
 					}
 					return okResult(
-						`Reset preview for ${preview.project}:\n` +
-							`State directory: ${preview.state}\n` +
-							`Notes that will reset: ${noteList}\n` +
-							`Originals will be saved under ${preview.backup_parent}.\n` +
-							"Nothing was changed. To commit, call this tool again with " +
-							`confirmation: "${preview.confirmation}" and the user's agreement.`,
+						texts.preview(
+							preview.project ?? cwd,
+							preview.state ?? "",
+							noteList,
+							preview.backup_parent ?? "",
+							preview.confirmation ?? "",
+						),
 						{
 							...detailsBase,
 							status: preview.status,
@@ -116,33 +211,32 @@ export function registerVibeWiseReset(pi: ExtensionAPI): void {
 				// Invocation, silence, or earlier tool approvals are not consent — only
 				// this dialog is.
 				const approved = await ctx.ui.confirm(
-					"Reset",
-					`Reset VibeWise learning for ${preview.project}?\n` +
-						`State directory: ${preview.state}\n` +
-						`Notes that will reset: ${noteList}\n` +
-						`Originals will be saved under ${preview.backup_parent}.`,
+					texts.dialogTitle,
+					texts.dialogMessage(
+						preview.project ?? cwd,
+						preview.state ?? "",
+						noteList,
+						preview.backup_parent ?? "",
+					),
 					{ signal },
 				);
 				if (!approved) {
-					return okResult(
-						"User cancelled. No changes were made, including to learner notes.",
-						{ ...detailsBase, status: "preview", cancelled: true },
-					);
+					return okResult(texts.cancelled, {
+						...detailsBase,
+						status: "preview",
+						cancelled: true,
+					});
 				}
 
 				// Committed with the exact preview token; lib re-checks it internally.
 				const committed = resetNotes(cwd, preview.confirmation ?? "");
-				return okResult(
-					`Learning notes reset. Backup: ${committed.backup}. Now read the learn ` +
-						"skill and restart onboarding with fresh notes.",
-					{
-						status: committed.status,
-						project: committed.project,
-						state: committed.state,
-						backup: committed.backup,
-						cwd,
-					},
-				);
+				return okResult(texts.committed(committed.backup ?? ""), {
+					status: committed.status,
+					project: committed.project,
+					state: committed.state,
+					backup: committed.backup,
+					cwd,
+				});
 			} catch (error) {
 				// Surface the helper's exact message text (never reworded).
 				const message = error instanceof Error ? error.message : String(error);

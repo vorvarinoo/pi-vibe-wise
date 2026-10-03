@@ -91,11 +91,12 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 ## Test coverage
 
-`npx vitest run` on Windows: **81 passed, 5 skipped** (86 total) — `lib/` behaviour
+`npx vitest run` on Windows: **84 passed, 5 skipped** (89 total) — `lib/` behaviour
 (`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2), the
-extension layer (`extension.test.ts` 34: handlers with fake ctx, tool_result
+extension layer (`extension.test.ts` 37: handlers with fake ctx, tool_result
 marker, the three tools' fallback/cancel/confirm/no-write semantics, M5 reset
-cases, and the M6 compaction seam), and `integration.test.ts` (2 real headless
+cases, the M6 compaction seam, and the language-adaptive dialog cases), and
+`integration.test.ts` (2 real headless
 pi runs, **opt-in**; skipped by default with an explicit reason).
 `buildPointer` measures **962 bytes** from the package root (bound: ≤ 1100).
 
@@ -137,6 +138,19 @@ Remaining skips are platform- or environment-limited, not unimplemented:
   byte-equal to Python's for the same state. Tokens are never exchanged between the two
   implementations, so this is internal-only; do not use a fingerprint produced by one
   runtime to confirm a reset in the other.
+- **Adaptive language (deliberate prose divergence).** The skill prose is no longer a
+  byte-for-byte port: `behavior.md` gained a *Language* rule (questions, explanations,
+  headings, and button labels follow the learner's language) and a Russian label set for
+  the checkpoint headings and confirmation buttons (`Точка подхода`, `Подтвердить и
+  продолжить`, `Реализуй этот шаг`, `Обсудить`, …) alongside the canonical English ones;
+  the `✦ <Type>:` structure is unchanged. In the tool layer, `vibe_wise_reset` takes an
+  optional `language` (`"ru"`/`"en"`, default `en`, unknown values fall back to English)
+  and renders its dialog/preview/result texts from a fixed en/ru table — the dialog text
+  stays tool-owned (never model-authored), so consent cannot be softened by the model.
+  `vibe_wise_ask` reuses the model-composed question as the input title and made the
+  placeholder optional, removing the hardcoded English `"Your answer"/"Type something…"`.
+  `lib/reset.ts` error texts remain verbatim English on purpose: they are the exact-port
+  error contract (asserted in tests) and are model-facing diagnostics, not user UI.
 
 ## M4 runtime facts (pi 0.84.1, verified in dist)
 
