@@ -9,9 +9,9 @@
 | --- | --- |
 | M1 Scaffolding & infra | done |
 | M2 State library (`lib/`) | done — reviewed, mandatory fixes applied |
-| M3 Skills (prose port) | not started |
-| M4 Extension boot + injection | not started |
-| M5 Reset tool (full flow) | not started |
+| M3 Skills (prose port) | done |
+| M4 Extension boot + injection | done — spike verified (entry_appended active/paused) |
+| M5 Reset tool (full flow) | partially done — the tool is fully wired in M4 (see deviations); M5 = integration verification |
 | M6 Compaction survival + observability | not started |
 | M7 Docs, README, install prep | not started |
 
@@ -88,9 +88,11 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 ## Test coverage
 
-`npx vitest run` on Windows: **47 passed, 3 skipped** (50 total) — `lib/` behaviour is
-covered by three files (`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2).
-`buildPointer` currently measures **962 bytes** for a realistic plugin root (bound: ≤ 1100).
+`npx vitest run` on Windows: **72 passed, 3 skipped** (75 total) — `lib/` behaviour
+(`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2) plus the
+extension layer (`extension.test.ts` 22: handlers with fake ctx, tool_result
+marker, and the three tools' fallback/cancel/confirm/no-write semantics).
+`buildPointer` measures **1007 bytes** from the real package root (bound: ≤ 1100).
 
 Remaining skips are platform-limited, not unimplemented:
 
@@ -127,3 +129,63 @@ Remaining skips are platform-limited, not unimplemented:
   byte-equal to Python's for the same state. Tokens are never exchanged between the two
   implementations, so this is internal-only; do not use a fingerprint produced by one
   runtime to confirm a reset in the other.
+
+## M4 runtime facts (pi 0.84.1, verified in dist)
+
+These shape the extension layer and must be re-checked on any Pi upgrade:
+
+1. **`AgentToolResult` has no `isError` field.** The runtime marks a tool result as an
+   error only when `execute()` throws — and then replaces `details` with `{}`
+   (`createErrorToolResult` in `pi-agent-core/dist/agent-loop.js`), which would lose the
+   fallback/error payloads. The tools therefore return normal results carrying
+   `details.vibeWiseIsError`, and a `tool_result` extension hook flips `isError` per call
+   while keeping details intact (`agent-session.js`:
+   `isError: hookResult?.isError ?? isError`).
+2. **`ctx.ui.select` takes plain strings** (`types.d.ts:70`), not `{label, description}`
+   objects (that's the `ctx.ui.custom()` example territory). Descriptions are folded in
+   as `label — description` and mapped back by exact match (`extensions/tools/shared.ts`).
+3. **`/skill:` is a TUI command.** In `--mode json`/print it is not expanded; the literal
+   text goes to the model. Skills with `disable-model-invocation: true` are also hidden
+   from the model's skill list. Activation paths: TUI `/skill:...`, or the injected
+   pointer telling the model to Read the skill file (the original plugin's semantics).
+4. **Skills are validated at load.** `core/skills.js` enforces name charset/length and
+   `description` ≤ 1024, emitting diagnostics for violations. Both package skills parse
+   with **zero diagnostics** (checked with Pi's own loader); a deliberately broken skill
+   produces a warning, confirming the check works.
+5. **pi dev-types must match the runtime.** npm resolves the `peerDependencies: "*"` of
+   this package to the latest published pi (1.0.0 added `outputSchema`, `exposure`,
+   `namespace` to `ToolDefinition`), while the installed CLI is 0.84.1. The dev deps are
+   pinned to `0.84.1` (`--save-exact`) so `tsc` cannot validate APIs the runtime lacks.
+   Re-pin after a CLI upgrade.
+
+## M4 spike — injection verified end-to-end (headless)
+
+The injected system prompt is not observable in the session JSON stream, so the
+extension appends a `vibe-wise-injected` custom entry under
+`VIBE_WISE_DEBUG_ENTRY=1` (`pi.appendEntry` → wire event `entry_appended`).
+
+```bash
+# fixture with .vibe-wise/profile.md = "Learning mode: active\nOnboarding: complete\n"
+cd /tmp/vw-fixture-active && VIBE_WISE_DEBUG_ENTRY=1 \
+  pi -p -a --mode json -e <abs>/vibe-wise/extensions/index.ts "reply with the single word ok"
+# => entry_appended {customType: "vibe-wise-injected", data: {stateDir: ...\\.vibe-wise, pointerLength: 1007}}
+
+# same fixture but profile = "Learning mode: paused\n..."  =>  0 matches
+```
+
+Result: active fixture → **1** `entry_appended`; paused fixture → **0**; both
+runs exit 0 in ~8 s with empty stderr. Without the extension loaded, or with
+no state directory, no entry is emitted either.
+
+## M3/M4 deviations from PLAN
+
+- **`vibe_wise_reset` fully wired in M4** (plan: stub in M4, full in M5). The reviewed
+  `lib/reset.ts` was already complete; a stub would be strictly less safe. M5 becomes
+  integration verification.
+- **`vibe_wise_questionnaire` is a bounded sequential `ui.select` loop**, not a
+  `ctx.ui.custom()` TUI component (plan §4.4). Same one-question-at-a-time UX, far less
+  bespoke TUI surface; documented in the tool's docstring.
+- **Prose port (M3)** is 1:1 with exactly one sanctioned divergence: the picker call
+  (`AskUserQuestion` → `vibe_wise_ask`), spelled out in `behavior.md` and
+  `onboarding.md` with the tool's real signature and the non-UI fallback rule. The
+  line-level diffs are in the milestone report; `state-templates.md` is verbatim.
