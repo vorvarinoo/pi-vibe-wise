@@ -11,8 +11,8 @@
 | M2 State library (`lib/`) | done — reviewed, mandatory fixes applied |
 | M3 Skills (prose port) | done — reviewed, no drift found |
 | M4 Extension boot + injection | done — reviewed; one blocker fixed (see M3+M4 review log) |
-| M5 Reset flow integration verification | not started |
-| M6 Compaction survival + observability | not started |
+| M5 Reset flow integration verification | done — tool-level edge cases + manual TUI checklist |
+| M6 Compaction survival + observability | done — seam tests + bounded integration tests (skip-on-hang) |
 | M7 Docs, README, install prep | not started |
 
 ## Spike results (M1)
@@ -43,7 +43,10 @@
 cd vibe-wise
 npm install
 npx tsc --noEmit
-npx vitest run
+npx vitest run                    # fast, hermetic: unit + seam tests
+
+# opt-in: boots the real pi runtime against a temp fixture (needs a live provider)
+VIBE_WISE_INTEGRATION=1 npx vitest run tests/integration.test.ts
 ```
 
 ## Review log — M1+M2
@@ -88,17 +91,21 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 ## Test coverage
 
-`npx vitest run` on Windows: **73 passed, 3 skipped** (76 total) — `lib/` behaviour
-(`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2) plus the
-extension layer (`extension.test.ts` 26: handlers with fake ctx, tool_result
-marker, and the three tools' fallback/cancel/confirm/no-write semantics).
+`npx vitest run` on Windows: **80 passed, 5 skipped** (85 total) — `lib/` behaviour
+(`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2), the
+extension layer (`extension.test.ts` 33: handlers with fake ctx, tool_result
+marker, the three tools' fallback/cancel/confirm/no-write semantics, M5 reset
+cases, and the M6 compaction seam), and `integration.test.ts` (2 real headless
+pi runs, **opt-in**; skipped by default with an explicit reason).
 `buildPointer` measures **962 bytes** from the package root (bound: ≤ 1100).
 
-Remaining skips are platform-limited, not unimplemented:
+Remaining skips are platform- or environment-limited, not unimplemented:
 
-1. `profileIsActive > symlinked profile is not read` — needs a **file** symlink.
-2. `reset: fingerprint binding > non-regular notes rejected` — same.
-3. `reset: backup dir mode is 0o700 on POSIX` — NTFS does not apply POSIX modes.
+1. `profileIsActive > symlinked profile is not read` — needs a **file** symlink.2. `reset: fingerprint binding > non-regular notes rejected` — same.
+2. `reset: backup dir mode is 0o700 on POSIX` — NTFS does not apply POSIX modes.
+3. both `integration.test.ts` tests when the `opencode-go` provider hangs
+   (explicit `ctx.skip("provider did not respond within 90s …")` — loud, never
+   a silent pass; see *M6 integration tests* below).
 
 ## Windows notes
 
@@ -247,3 +254,94 @@ confirm → commit → Cancel) as a required step.
   (`AskUserQuestion` → `vibe_wise_ask`), spelled out in `behavior.md` and
   `onboarding.md` with the tool's real signature and the non-UI fallback rule. The
   line-level diffs are in the milestone report; `state-templates.md` is verbatim.
+
+## M5 — reset-flow integration verification (done)
+
+The reset tool was already fully wired in M4 (see deviations below), so M5 became
+tool-level verification of the consent contract and its edge cases. All cases live in
+`tests/extension.test.ts` and drive the real registered tool (`registerVibeWiseReset`
+against a fake `pi`, `ctx` with a counting `ui.confirm`):
+
+| Case | Pinned behaviour |
+| --- | --- |
+| tool preview | returns `project` / `state` / `files` / `backup_parent` / `confirmation`; the text carries the paths for the chat message; `ui.confirm` calls === 0; note bytes identical; `backups/` not created |
+| `no_notes` via tool | friendly text, `status: no_notes`, non-error marker, zero dialogs, state dir still empty |
+| commit with a **foreign** fingerprint | refused with `Target or notes changed…`, dialog **not** shown, both projects byte-identical, no `backups/` anywhere |
+| note vanishes between preview and commit | refused with the **exact** `FINGERPRINT_MISMATCH_MESSAGE` (single-sourced from `lib/reset.ts`), dialog not shown, remaining notes untouched |
+| `cwd` param | relative `cwd` rejected before resolution (`Use an existing absolute project working directory.`); an explicit absolute cwd of another project is honored — reset happens there, `ctx.cwd`'s project is never touched |
+| stale confirmation (existing test) | now also asserts `confirm` was never called: the refusal must happen **before** the dialog |
+
+### Manual TUI verification (required before release)
+
+Cannot be automated in this environment (no TTY); the checklist below must be executed
+once in an interactive `pi` session before shipping:
+
+1. In a project with an **active** `.vibe-wise/profile.md`, run `/skill:vibe-wise-reset`.
+2. The model calls `vibe_wise_reset` **without** `confirmation` → the tool must show **no
+   dialog** and reply with a preview: state dir path, the three note paths, the
+   `backups/` location, and the fingerprint.
+3. The model shows those paths in chat and asks to proceed (SKILL step 2).
+4. Say yes → the model calls the tool again **with** the preview's fingerprint → the
+   tool's own dialog appears (`Reset VibeWise learning for …`).
+5. Choose **Cancel** → the tool replies `User cancelled…`; verify in the shell that all
+   three note files still have their original bytes and that `.vibe-wise/backups/` does
+   **not** exist.
+6. Call the reset skill flow again, this time approve the dialog → notes become the FRESH
+   templates (`profile.md` contains `Onboarding: incomplete`), and
+   `.vibe-wise/backups/reset-<UTC>-XXXX/` contains the original bytes.
+
+## M6 — compaction survival + observability (done)
+
+### Compaction survival — verified at the seam and in the 0.84.1 sources
+
+Unit seam (`tests/extension.test.ts`, "compaction survival (M6, seam-level)"):
+`session_start(startup)` → `before_agent_start` → **no session event at all** (this is
+exactly what `/compact` produces) → `before_agent_start` again ⇒ the second pointer is
+byte-identical and still present; a separate test asserts `extensions/index.ts`
+registers **no** `session_before_compact` / `session_compact` handler.
+
+Source verification (`@earendil-works/pi-coding-agent` 0.84.1, `dist/core/agent-session.js`):
+
+- The `/compact` command (`core/slash-commands.js:21`) calls `compact()` at
+  `agent-session.js:1367`, which emits only `compaction_start` (:1370) / `compaction_end`
+  (:1459; the failure path emits it again at :1472) plus — **only if some extension has a
+  handler** — `session_before_compact` (:1389) and `session_compact` (:1441). It never
+  emits `session_start` or `session_shutdown`.
+- `session_start` is emitted only on session (re)creation (`agent-session-runtime.js:141,
+  165, 211, 229, 246, 283`) and on `/reload` (`agent-session.js:2072`).
+  `session_shutdown` accompanies `/reload` (`agent-session.js:2055`) as well as ordinary
+  runtime teardown / exit (`agent-session-runtime.js:107,290`) — none of which `/compact`
+  triggers.
+- The `ExtensionRunner` (and therefore our handler closures and the state cache) is
+  created once per session (`agent-session.js:2037`) and is **not** rebuilt by compaction.
+
+Consequence: our extension gets **zero** callbacks from `/compact`; the cache survives;
+the next `before_agent_start` re-injects the same pointer. No compaction handler is
+needed — this is now pinned by a test, not just by a comment.
+
+### M6 integration tests (bounded headless runs)
+
+`tests/integration.test.ts` boots the real packaged extension in the real CLI
+(`node <local dist/cli.js> -p -a --mode json -e <extensions/index.ts>`, provider
+`opencode-go`):
+
+- **active** fixture → on success: exactly **one** `entry_appended` with
+  `customType === "vibe-wise-injected"`, `stateDir` pointing at the fixture's
+  `.vibe-wise`, and `800 < pointerLength ≤ 1100` (measured 999 for short fixture paths);
+- **paused** fixture → zero such entries;
+- per-run kill at 90 s (cold start measured > 70 s, warm ~17 s) → on hang the test calls
+  `skipCtx.skip("provider did not respond within 90s (run killed); …")` — a loud,
+  reported skip, never a silent pass; at most two pi invocations per suite; async
+  `spawn` (a blocking `spawnSync` froze the vitest worker's RPC loop —
+  `Timeout calling "onTaskUpdate"`), temp fixtures removed in `afterAll`.
+- The spawn uses the repo's **pinned local** pi (0.84.1, resolved from
+  `node_modules`), not whatever `pi` happens to be on `PATH`.
+- **Opt-in.** The file only runs with `VIBE_WISE_INTEGRATION=1`; otherwise both tests
+  skip with an explicit reason. Reason for the default: while the provider hangs, the two
+  90 s kills made `npx vitest run` a **3-minute** command that proved nothing — that
+  discourages running the suite at all. With the flag the same run answers in ~17 s when
+  the provider is healthy. `VIBE_WISE_INTEGRATION_TIMEOUT_MS` overrides the 90 s cap.
+  **Known coverage hole:** while the provider is down, the `pi.appendEntry` passthrough in
+  `extensions/index.ts` is guarded only by this opt-in file — the unit-level debug-entry
+  test fakes that dependency, so it cannot catch a regression in the wiring.
+  Run before release: `VIBE_WISE_INTEGRATION=1 npx vitest run tests/integration.test.ts`.

@@ -245,6 +245,54 @@ describe("tool_result marker", () => {
 });
 
 describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
+	/** Register the tool against a fake pi and return its execute(). */
+	async function resetTool() {
+		const { registerVibeWiseReset } = await import(
+			"../extensions/tools/vibe_wise_reset"
+		);
+		const registered: Array<{
+			name: string;
+			execute: (
+				id: string,
+				params: Record<string, unknown>,
+				signal: unknown,
+				onUpdate: unknown,
+				ctx: unknown,
+			) => Promise<unknown>;
+		}> = [];
+		registerVibeWiseReset({
+			registerTool: (t: never) => registered.push(t as never),
+		} as never);
+		const tool = registered[0];
+		expect(tool.name).toBe("vibe_wise_reset");
+		return tool;
+	}
+
+	/** Snapshot of all note bytes in a state dir (order-independent compare). */
+	function noteBytes(state: string): Record<string, Buffer> {
+		return Object.fromEntries(
+			readdirSync(state)
+				.sort()
+				.map((f) => [f, readFileSync(path.join(state, f))] as const),
+		);
+	}
+
+	/** Fake interactive ctx with a counting confirm dialog. */
+	function uiCtx(cwd: string, answer = true) {
+		const confirmCalls = { count: 0 };
+		const ctx = {
+			hasUI: true,
+			cwd,
+			ui: {
+				confirm: async () => {
+					confirmCalls.count += 1;
+					return answer;
+				},
+			},
+		} as never;
+		return { ctx, confirmCalls };
+	}
+
 	it("preview reports the state, files, backup parent, and confirmation without writing", async () => {
 		const { project } = freshProject("active");
 		const state = path.join(project, ".vibe-wise");
@@ -409,25 +457,201 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		).toEqual(originals["profile.md"]);
 	});
 
+	// --- M5: tool-level behavioural coverage (task items 1-6) ---
+
+	it("[M5] tool preview returns project/state/files/backup_parent/confirmation, no dialog, no writes", async () => {
+		const { project } = freshProject("active");
+		const state = path.join(project, ".vibe-wise");
+		const before = noteBytes(state);
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(project);
+
+		const result = (await tool.execute(
+			"t1",
+			{}, // no cwd -> defaults to ctx.cwd
+			undefined,
+			undefined,
+			ctx,
+		)) as {
+			content: { text: string }[];
+			details: {
+				status: string;
+				project: string;
+				state: string;
+				files: string[];
+				backup_parent: string;
+				confirmation: string;
+			};
+		};
+		expect(result.details.status).toBe("preview");
+		expect(result.details.project).toBe(project);
+		expect(result.details.state).toBe(state);
+		expect(result.details.files).toEqual([
+			"profile.md",
+			"progress.md",
+			"project-map.md",
+		]);
+		expect(result.details.backup_parent).toBe(path.join(state, "backups"));
+		expect(result.details.confirmation).toEqual(expect.any(String));
+		// Paths reach the model in the text so it can show them in chat (SKILL step 2).
+		expect(result.content[0].text).toContain(state);
+		expect(result.content[0].text).toContain(path.join(state, "backups"));
+		expect(result.content[0].text).toContain("Nothing was changed");
+		// Read-only: no dialog, bytes identical, backups/ not even created.
+		expect(confirmCalls.count).toBe(0);
+		expect(noteBytes(state)).toEqual(before);
+		expect(existsSync(path.join(state, "backups"))).toBe(false);
+	});
+
+	it("[M5] no_notes via the tool: friendly text, no dialog, nothing created", async () => {
+		const { project } = freshProject("active");
+		// Empty the state dir: directory exists, no note files.
+		for (const f of readdirSync(path.join(project, ".vibe-wise"))) {
+			rmSync(path.join(project, ".vibe-wise", f));
+		}
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(project);
+
+		const result = (await tool.execute(
+			"t1",
+			{},
+			undefined,
+			undefined,
+			ctx,
+		)) as { content: { text: string }[]; details: Record<string, unknown> };
+		expect(result.details.status).toBe("no_notes");
+		expect(result.details.vibeWiseIsError).toBe(false); // explicit non-error marker
+		expect(result.content[0].text).toContain("No VibeWise learning notes");
+		expect(confirmCalls.count).toBe(0);
+		// Nothing written: state dir still empty, backups/ absent.
+		expect(readdirSync(path.join(project, ".vibe-wise"))).toEqual([]);
+		expect(existsSync(path.join(project, ".vibe-wise", "backups"))).toBe(false);
+	});
+
+	it("[M5] commit with a fingerprint from ANOTHER project is refused before any dialog", async () => {
+		const mine = freshProject("active");
+		const theirs = freshProject("active");
+		const myState = path.join(mine.project, ".vibe-wise");
+		const theirState = path.join(theirs.project, ".vibe-wise");
+		const myBefore = noteBytes(myState);
+		const theirBefore = noteBytes(theirState);
+
+		const { resetNotes } = await import("../lib/reset");
+		const foreign = resetNotes(theirs.project);
+
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(mine.project);
+		const result = (await tool.execute(
+			"t1",
+			{ confirmation: foreign.confirmation ?? "" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { content: { text: string }[]; details: Record<string, unknown> };
+		expect(result.details.vibeWiseIsError).toBe(true);
+		expect(result.content[0].text).toContain("Target or notes changed");
+		// The dialog must NOT be shown for a foreign token.
+		expect(confirmCalls.count).toBe(0);
+		// Both projects byte-identical, no backups anywhere.
+		expect(noteBytes(myState)).toEqual(myBefore);
+		expect(noteBytes(theirState)).toEqual(theirBefore);
+		expect(existsSync(path.join(myState, "backups"))).toBe(false);
+		expect(existsSync(path.join(theirState, "backups"))).toBe(false);
+	});
+
+	it("[M5] commit is refused with the exact mismatch message when a note vanishes after preview", async () => {
+		const { project } = freshProject("active");
+		const state = path.join(project, ".vibe-wise");
+		const before = noteBytes(state);
+
+		const { FINGERPRINT_MISMATCH_MESSAGE, resetNotes } = await import(
+			"../lib/reset"
+		);
+		const preview = resetNotes(project);
+		rmSync(path.join(state, "progress.md")); // vanish between preview and commit
+
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(project);
+		const result = (await tool.execute(
+			"t1",
+			{ confirmation: preview.confirmation ?? "" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { content: { text: string }[]; details: Record<string, unknown> };
+		// Exact text, single-sourced from the ported helper — never reworded.
+		expect(result.content[0].text).toBe(FINGERPRINT_MISMATCH_MESSAGE);
+		expect(result.details.vibeWiseIsError).toBe(true);
+		expect(confirmCalls.count).toBe(0); // refusal happens BEFORE the dialog
+		// Remaining notes untouched, the vanished one stays gone, no backups/.
+		const after = noteBytes(state);
+		expect(Object.keys(after).sort()).toEqual(["profile.md", "project-map.md"]);
+		expect(after["profile.md"]).toEqual(before["profile.md"]);
+		expect(after["project-map.md"]).toEqual(before["project-map.md"]);
+		expect(existsSync(path.join(state, "backups"))).toBe(false);
+	});
+
+	it("[M5] cwd param: relative cwd rejected; an explicit absolute cwd of another project is honored", async () => {
+		const home = freshProject("active"); // ctx.cwd project — must stay untouched
+		const other = freshProject("active"); // explicit target
+		const homeState = path.join(home.project, ".vibe-wise");
+		const homeBefore = noteBytes(homeState);
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(home.project);
+
+		// (a) Relative cwd is rejected before any resolution.
+		const rejected = (await tool.execute(
+			"t1",
+			{ cwd: "." },
+			undefined,
+			undefined,
+			ctx,
+		)) as { content: { text: string }[]; details: Record<string, unknown> };
+		expect(rejected.details.vibeWiseIsError).toBe(true);
+		expect(rejected.content[0].text).toContain(
+			"Use an existing absolute project working directory",
+		);
+		expect(confirmCalls.count).toBe(0);
+		expect(noteBytes(homeState)).toEqual(homeBefore);
+
+		// (b) An explicit absolute cwd of another project is honored: the reset
+		// happens THERE, and ctx.cwd's project is never touched.
+		const preview = (await tool.execute(
+			"t2",
+			{ cwd: other.project },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { status: string; state: string; confirmation: string } };
+		expect(preview.details.status).toBe("preview");
+		expect(preview.details.state).toBe(path.join(other.project, ".vibe-wise"));
+
+		const committed = (await tool.execute(
+			"t3",
+			{ cwd: other.project, confirmation: preview.details.confirmation },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { status: string; state: string; backup: string } };
+		expect(confirmCalls.count).toBe(1); // dialog shown once, for the OTHER project
+		expect(committed.details.status).toBe("reset");
+		expect(committed.details.state).toBe(
+			path.join(other.project, ".vibe-wise"),
+		);
+		expect(
+			readFileSync(
+				path.join(other.project, ".vibe-wise", "profile.md"),
+			).toString(),
+		).toContain("Onboarding: incomplete"); // FRESH
+		expect(noteBytes(homeState)).toEqual(homeBefore); // ctx.cwd untouched
+		expect(existsSync(path.join(homeState, "backups"))).toBe(false);
+	});
+
 	it("refuses to commit when the notes changed between preview and confirm", async () => {
 		const { project } = freshProject("active");
 		const state = path.join(project, ".vibe-wise");
-		const { registerVibeWiseReset } = await import(
-			"../extensions/tools/vibe_wise_reset"
-		);
-		const registered: Array<{
-			name: string;
-			execute: (...args: unknown[]) => Promise<unknown>;
-		}> = [];
-		registerVibeWiseReset({
-			registerTool: (t: never) => registered.push(t as never),
-		} as never);
-		const tool = registered[0];
-		const ctx = {
-			hasUI: true,
-			cwd: project,
-			ui: { confirm: async () => true },
-		} as never;
+		const tool = await resetTool();
+		const { ctx, confirmCalls } = uiCtx(project, true);
 		const { resetNotes } = await import("../lib/reset");
 		const preview = resetNotes(project);
 		// Mutate notes after the preview.
@@ -447,6 +671,60 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		};
 		expect(failed.details.vibeWiseIsError).toBe(true);
 		expect(failed.content[0].text).toContain("Target or notes changed");
+		// A stale token must be refused BEFORE the dialog is shown.
+		expect(confirmCalls.count).toBe(0);
+	});
+});
+
+describe("compaction survival (M6, seam-level)", () => {
+	it("pointer survives a /compact with no session event: second turn injects an identical pointer", async () => {
+		// /compact emits neither session_start nor session_shutdown (verified in the
+		// 0.84.1 dist — see docs/development.md), so the runtime drives the handler
+		// exactly like this: session_start once, then consecutive agent turns.
+		const { project } = freshProject("active");
+		const stateDir = path.join(project, ".vibe-wise");
+		const session = createSessionStartHandler(makeDeps());
+		await session.handle({ reason: "startup" }, { cwd: project });
+		const before = createBeforeAgentStartHandler(makeDeps(), session.cache);
+
+		const first = (await before.handle({ systemPrompt: "BASE" })) as {
+			systemPrompt: string;
+		};
+		expect(first.systemPrompt.startsWith("BASE\n\n")).toBe(true);
+
+		// === /compact happens here: NO session_start, NO session_shutdown, no
+		// handler call at all — the cache is deliberately left untouched ===
+
+		const second = (await before.handle({ systemPrompt: "BASE" })) as {
+			systemPrompt: string;
+		};
+		expect(second.systemPrompt).toBe(first.systemPrompt); // identical, still present
+		expect(session.cache.current?.stateDir).toBe(stateDir);
+	});
+
+	it("registers no session_before_compact / session_compact handler (deliberate)", async () => {
+		// The wiring must not react to compaction events at all: /compact already
+		// leaves the extension instance and its cache intact.
+		const source = readFileSync(
+			path.resolve(__dirname, "../extensions/index.ts"),
+			"utf-8",
+		);
+		expect(source).not.toMatch(/session_before_compact|session_compact/);
+	});
+
+	it("wires the debug appendEntry sink into the injection handler (source-assert)", () => {
+		// The integration test is opt-in (a dead provider made it a 3-minute no-op),
+		// so this static check is what keeps the passthrough from being deleted from
+		// the wiring layer: without it, VIBE_WISE_DEBUG_ENTRY would silently stop
+		// producing entry_appended and only the opt-in runtime test would notice.
+		const source = readFileSync(
+			path.resolve(__dirname, "../extensions/index.ts"),
+			"utf-8",
+		);
+		expect(source).toMatch(/pi\.appendEntry\(/);
+		expect(source).toMatch(
+			/createBeforeAgentStartHandler\([\s\S]*?appendEntry[\s\S]*?\)/,
+		);
 	});
 });
 
