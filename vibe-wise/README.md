@@ -128,4 +128,4 @@ From the port's acceptance criteria, actually checked by the test suite:
 ## Attribution and license
 
 MIT. Original `vibe-wise` Claude Code plugin by Noah Kim (© 2026); this is a Pi
-port by the vibe-wise contributors, not the original. See [LICENSE](LICENSE).
+port by Vorvarinoo, not the original. See [LICENSE](LICENSE).

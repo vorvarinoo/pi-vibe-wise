@@ -4,6 +4,7 @@
   "description": "Learning mode for Pi: asks for your approach first, then codes the chosen design and explains it. Port of the vibe-wise Claude Code plugin (v0.1.43).",
   "type": "module",
   "license": "MIT",
+  "author": "Vorvarinoo",
   "keywords": [
     "pi-package",
     "learning",
