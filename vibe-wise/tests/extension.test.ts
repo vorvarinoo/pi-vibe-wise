@@ -532,7 +532,13 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		it("missing or unknown language falls back to English without failing", async () => {
 			// "toString"/"constructor" cover inherited object keys: a plain lookup returns
 			// those functions and breaks the fallback contract.
-			for (const language of [undefined, "fr", "RU", "toString", "constructor"]) {
+			for (const language of [
+				undefined,
+				"fr",
+				"RU",
+				"toString",
+				"constructor",
+			]) {
 				const { project } = freshProject("active");
 				const tool = await resetTool();
 				const { ctx, dialogs } = ruCtx(project);
