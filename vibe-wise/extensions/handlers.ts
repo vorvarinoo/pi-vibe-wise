@@ -87,7 +87,9 @@ export function createSessionStartHandler(deps: HandlerDeps) {
 				// Single read serves both activation and language (no double scan); an
 				// injected isActive seam still wins over the derived fact.
 				const facts = await factsOf(profilePath);
-				const active = deps.isActive ? await isActive(profilePath) : facts.active;
+				const active = deps.isActive
+					? await isActive(profilePath)
+					: facts.active;
 				if (active) {
 					cache.current = {
 						stateDir: state,

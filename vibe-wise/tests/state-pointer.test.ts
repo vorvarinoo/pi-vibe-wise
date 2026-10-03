@@ -3,7 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildPointer, type PointerInput } from "../lib/pointer";
 import { stateDirectory } from "../lib/state-directory";
-import { profileIsActive, profileLanguage, readProfileFacts } from "../lib/profile";
+import {
+	profileIsActive,
+	profileLanguage,
+	readProfileFacts,
+} from "../lib/profile";
 import {
 	makeNotes,
 	makeProject,
@@ -419,11 +423,11 @@ describe("buildPointer", () => {
 		expect(text).toContain("this hook is not an explicit Learn invocation.");
 	});
 
-		it("reported actual byte length (realistic path)", () => {
-			const len = Buffer.byteLength(buildPointer(base), "utf-8");
-			console.log(`buildPointer length = ${len} bytes`);
-			expect(len).toBeGreaterThan(800);
-		});
+	it("reported actual byte length (realistic path)", () => {
+		const len = Buffer.byteLength(buildPointer(base), "utf-8");
+		console.log(`buildPointer length = ${len} bytes`);
+		expect(len).toBeGreaterThan(800);
+	});
 });
 
 describe("profileLanguage (deterministic learning language)", () => {
@@ -441,7 +445,9 @@ describe("profileLanguage (deterministic learning language)", () => {
 		expect(profileLanguage("Language: ru\nLanguage: en\n")).toBe("ru");
 		// Language line at the start of a 100KB profile is still found.
 		expect(profileLanguage("Language: ru\n" + "a".repeat(100_000))).toBe("ru");
-		expect(profileLanguage("a".repeat(100_000) + "\nLanguage: ru\n")).toBe("ru");
+		expect(profileLanguage("a".repeat(100_000) + "\nLanguage: ru\n")).toBe(
+			"ru",
+		);
 	});
 
 	it("non-whitelisted or garbage codes -> null", () => {
@@ -506,14 +512,28 @@ describe("buildPointer with learning language", () => {
 		const ru = buildPointer({ ...base, language: "ru" });
 		const en = buildPointer({ ...base, language: "en" });
 		expect(ru.startsWith(def + "\n")).toBe(true);
-		expect(ru.split("\n").at(-1)).toMatch(/^Learning language: ru — reply in Russian\.$/);
-		expect(en.split("\n").at(-1)).toMatch(/^Learning language: en — reply in English\.$/);
-		expect(Buffer.byteLength(ru.split("\n").at(-1)!, "utf-8")).toBeLessThanOrEqual(60);
+		expect(ru.split("\n").at(-1)).toMatch(
+			/^Learning language: ru — reply in Russian\.$/,
+		);
+		expect(en.split("\n").at(-1)).toMatch(
+			/^Learning language: en — reply in English\.$/,
+		);
+		expect(
+			Buffer.byteLength(ru.split("\n").at(-1)!, "utf-8"),
+		).toBeLessThanOrEqual(60);
 	});
 
 	it("no language / non-whitelisted language -> byte-identical to the 1:1 port", () => {
 		const def = buildPointer(base);
-		for (const language of [undefined, null, "", "fr", "RU", "toString", "constructor"]) {
+		for (const language of [
+			undefined,
+			null,
+			"",
+			"fr",
+			"RU",
+			"toString",
+			"constructor",
+		]) {
 			expect(buildPointer({ ...base, language }), String(language)).toBe(def);
 		}
 	});
@@ -530,11 +550,14 @@ describe("buildPointer with learning language", () => {
 		expect(after.length - before.length).toBe(
 			bigStateDir.length - base.stateDir.length,
 		);
-		expect(after.endsWith("Learning language: ru — reply in Russian.")).toBe(true);
+		expect(after.endsWith("Learning language: ru — reply in Russian.")).toBe(
+			true,
+		);
 	});
 
 	it("bounded: with the longest language line still <= 1100 bytes", () => {
-		expect(Buffer.byteLength(buildPointer({ ...base, language: "ru" }), "utf-8"))
-			.toBeLessThanOrEqual(1100);
+		expect(
+			Buffer.byteLength(buildPointer({ ...base, language: "ru" }), "utf-8"),
+		).toBeLessThanOrEqual(1100);
 	});
 });
