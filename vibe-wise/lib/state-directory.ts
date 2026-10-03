@@ -5,9 +5,9 @@ import { STATE_DIR_NAMES } from "./paths";
 
 /** The subset of `fs.Stats` the resolution rules depend on. */
 export interface DirStats {
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-  isFile(): boolean;
+	isDirectory(): boolean;
+	isSymbolicLink(): boolean;
+	isFile(): boolean;
 }
 
 /**
@@ -17,7 +17,7 @@ export interface DirStats {
  * project's learner profile.
  */
 function decideCandidate(stats: DirStats, candidate: string): string | null {
-  return stats.isDirectory() && !stats.isSymbolicLink() ? candidate : null;
+	return stats.isDirectory() && !stats.isSymbolicLink() ? candidate : null;
 }
 
 /**
@@ -25,7 +25,7 @@ function decideCandidate(stats: DirStats, candidate: string): string | null {
  * Reached via `stat()` (follows symlinks), matching Python's `Path.exists()`.
  */
 function isGitBoundary(stats: DirStats): boolean {
-  return stats.isDirectory() || stats.isFile();
+	return stats.isDirectory() || stats.isFile();
 }
 
 /**
@@ -42,32 +42,32 @@ function isGitBoundary(stats: DirStats): boolean {
  *    boundary — stop climbing.
  */
 export async function stateDirectory(cwd: string): Promise<string | null> {
-  let dir = path.resolve(cwd);
-  for (;;) {
-    for (const name of STATE_DIR_NAMES) {
-      const candidate = path.join(dir, name);
-      let stats;
-      try {
-        // lstat: a broken symlink still stats successfully (must NOT be skipped),
-        // while a missing candidate throws ENOENT.
-        stats = await lstat(candidate);
-      } catch {
-        continue; // candidate absent at this level
-      }
-      return decideCandidate(stats, candidate);
-    }
-    try {
-      // stat (not lstat): follows symlinks, like Python's Path.exists().
-      const git = await stat(path.join(dir, ".git"));
-      if (isGitBoundary(git)) break;
-    } catch {
-      // no .git here — keep climbing
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null; // filesystem root reached
-    dir = parent;
-  }
-  return null;
+	let dir = path.resolve(cwd);
+	for (;;) {
+		for (const name of STATE_DIR_NAMES) {
+			const candidate = path.join(dir, name);
+			let stats;
+			try {
+				// lstat: a broken symlink still stats successfully (must NOT be skipped),
+				// while a missing candidate throws ENOENT.
+				stats = await lstat(candidate);
+			} catch {
+				continue; // candidate absent at this level
+			}
+			return decideCandidate(stats, candidate);
+		}
+		try {
+			// stat (not lstat): follows symlinks, like Python's Path.exists().
+			const git = await stat(path.join(dir, ".git"));
+			if (isGitBoundary(git)) break;
+		} catch {
+			// no .git here — keep climbing
+		}
+		const parent = path.dirname(dir);
+		if (parent === dir) return null; // filesystem root reached
+		dir = parent;
+	}
+	return null;
 }
 
 /**
@@ -77,26 +77,26 @@ export async function stateDirectory(cwd: string): Promise<string | null> {
  * cannot drift between them.
  */
 export function stateDirectorySync(cwd: string): string | null {
-  let dir = path.resolve(cwd);
-  for (;;) {
-    for (const name of STATE_DIR_NAMES) {
-      const candidate = path.join(dir, name);
-      let stats;
-      try {
-        stats = lstatSync(candidate);
-      } catch {
-        continue; // candidate absent at this level
-      }
-      return decideCandidate(stats, candidate);
-    }
-    try {
-      const git = statSync(path.join(dir, ".git"));
-      if (isGitBoundary(git)) return null;
-    } catch {
-      // no .git here — keep climbing
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null; // filesystem root reached
-    dir = parent;
-  }
+	let dir = path.resolve(cwd);
+	for (;;) {
+		for (const name of STATE_DIR_NAMES) {
+			const candidate = path.join(dir, name);
+			let stats;
+			try {
+				stats = lstatSync(candidate);
+			} catch {
+				continue; // candidate absent at this level
+			}
+			return decideCandidate(stats, candidate);
+		}
+		try {
+			const git = statSync(path.join(dir, ".git"));
+			if (isGitBoundary(git)) return null;
+		} catch {
+			// no .git here — keep climbing
+		}
+		const parent = path.dirname(dir);
+		if (parent === dir) return null; // filesystem root reached
+		dir = parent;
+	}
 }
