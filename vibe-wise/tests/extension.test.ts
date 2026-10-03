@@ -344,7 +344,13 @@ describe("vibe_wise_reset tool semantics (via the reviewed lib)", () => {
 		} as never;
 
 		// Step 1 — preview: READ-ONLY, no dialog, no writes.
-		const preview = (await tool.execute("t0", {}, undefined, undefined, ctx)) as {
+		const preview = (await tool.execute(
+			"t0",
+			{},
+			undefined,
+			undefined,
+			ctx,
+		)) as {
 			content: { text: string }[];
 			details: { status: string; confirmation: string };
 		};
