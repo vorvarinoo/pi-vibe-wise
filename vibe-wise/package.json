@@ -4,7 +4,9 @@
   "description": "Learning mode for Pi: asks for your approach first, then codes the chosen design and explains it. Port of the vibe-wise Claude Code plugin (v0.1.43).",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -17,8 +19,12 @@
     "LICENSE"
   ],
   "pi": {
-    "extensions": ["./extensions/index.ts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -26,6 +32,8 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
