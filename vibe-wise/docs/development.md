@@ -13,7 +13,7 @@
 | M4 Extension boot + injection | done — reviewed; one blocker fixed (see M3+M4 review log) |
 | M5 Reset flow integration verification | done — tool-level edge cases + manual TUI checklist |
 | M6 Compaction survival + observability | done — seam tests + bounded integration tests (skip-on-hang) |
-| M7 Docs, README, install prep | not started |
+| M7 Docs, README, install prep | done — README/CHANGELOG/LICENSE/package metadata + install smoke test |
 
 ## Spike results (M1)
 
@@ -91,7 +91,7 @@ and both walkers share the `decideCandidate()` / `isGitBoundary()` helpers, so t
 
 ## Test coverage
 
-`npx vitest run` on Windows: **80 passed, 5 skipped** (85 total) — `lib/` behaviour
+`npx vitest run` on Windows: **81 passed, 5 skipped** (86 total) — `lib/` behaviour
 (`state-pointer.test.ts` 29, `reset.test.ts` 19, `smoke.test.ts` 2), the
 extension layer (`extension.test.ts` 33: handlers with fake ctx, tool_result
 marker, the three tools' fallback/cancel/confirm/no-write semantics, M5 reset
@@ -101,9 +101,10 @@ pi runs, **opt-in**; skipped by default with an explicit reason).
 
 Remaining skips are platform- or environment-limited, not unimplemented:
 
-1. `profileIsActive > symlinked profile is not read` — needs a **file** symlink.2. `reset: fingerprint binding > non-regular notes rejected` — same.
-2. `reset: backup dir mode is 0o700 on POSIX` — NTFS does not apply POSIX modes.
-3. both `integration.test.ts` tests when the `opencode-go` provider hangs
+1. `profileIsActive > symlinked profile is not read` — needs a **file** symlink.
+2. `reset: fingerprint binding > non-regular notes rejected` — same.
+3. `reset: backup dir mode is 0o700 on POSIX` — NTFS does not apply POSIX modes.
+4. both `integration.test.ts` tests when the `opencode-go` provider hangs
    (explicit `ctx.skip("provider did not respond within 90s …")` — loud, never
    a silent pass; see *M6 integration tests* below).
 
@@ -341,7 +342,48 @@ needed — this is now pinned by a test, not just by a comment.
   90 s kills made `npx vitest run` a **3-minute** command that proved nothing — that
   discourages running the suite at all. With the flag the same run answers in ~17 s when
   the provider is healthy. `VIBE_WISE_INTEGRATION_TIMEOUT_MS` overrides the 90 s cap.
-  **Known coverage hole:** while the provider is down, the `pi.appendEntry` passthrough in
-  `extensions/index.ts` is guarded only by this opt-in file — the unit-level debug-entry
-  test fakes that dependency, so it cannot catch a regression in the wiring.
+  The `pi.appendEntry` passthrough in `extensions/index.ts` that this file uniquely
+  pins at runtime is **additionally** guarded by a source-assert unit test (see the
+  M5+M6 review log), so the wiring is not lost silently between opt-in runs.
   Run before release: `VIBE_WISE_INTEGRATION=1 npx vitest run tests/integration.test.ts`.
+
+## Review log — M5+M6
+
+Verdict: **accepted**, no blocking findings (chain runtime 45m28s: worker ~34m + reviewer).
+
+What the reviewer verified independently:
+
+- Gates reproduced exactly: `tsc --noEmit` clean; **80 passed / 5 skipped** (85 total
+  at review time; 81/86 after the post-review source-assert below).
+- **All 5 mutations were caught** (each applied to a temp copy, reverted afterwards):
+  1. fused flow (preview shows the dialog AND commits) → preview test + 2 others fail;
+  2. dialog before the fingerprint check → fingerprint test (assert `confirm === 0`);
+  3. passed `cwd` ignored → `cwd param` test;
+  4. commit on `no_notes` → `no_notes via the tool` test;
+  5. `pi.appendEntry` removed from `extensions/index.ts` → integration test
+     (a loud **skip**, not a green, because the provider was hanging).
+- Integration tests skip loudly (never a silent pass) when the provider hangs; at most
+  two pi invocations per suite; temp fixtures removed in `afterAll`.
+- Compaction citations checked against the installed 0.84.1 dist line by line.
+
+Non-blocking doc inaccuracies found and fixed in the same pass (every citation
+re-verified against dist afterwards):
+
+- `compaction_end` was cited as `:1453` — it is **:1459** (failure path :1472);
+- `session_shutdown` "only on `/reload`" was over-stated — the runtime also emits it on
+  teardown/exit (`agent-session-runtime.js:107,290`).
+
+Post-review adjustments by the parent (transparent, after the accepted verdict):
+
+1. **`tests/integration.test.ts` is now opt-in** (`VIBE_WISE_INTEGRATION=1`). While the
+   provider hung, the two 90 s kills made `npx vitest run` a **3m02s** command that
+   proved nothing; the default suite is now **~2.8 s** (same 81/5 result, gate is green
+   and cheap enough to actually run). Default behaviour is a loud skip with the reason.
+2. **The coverage hole that opt-in creates is closed deterministically:** a source-assert
+   unit test pins the `pi.appendEntry` passthrough and its wiring into
+   `createBeforeAgentStartHandler` in `extensions/index.ts`. Verified by mutation:
+   removing the passthrough fails that test.
+3. `injectedEntries()` parses stdout tolerant-with-context instead of a bare
+   `JSON.parse` (a timeout-kill-truncated line would have surfaced as an opaque
+   SyntaxError).
+4. The two doc inaccuracies above.

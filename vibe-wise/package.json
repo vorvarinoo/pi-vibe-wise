@@ -5,7 +5,10 @@
   "type": "module",
   "license": "MIT",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "learning",
+    "tutor",
+    "sensible-coding"
   ],
   "engines": {
     "node": ">=20"
@@ -16,6 +19,7 @@
     "lib",
     "docs",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "pi": {
