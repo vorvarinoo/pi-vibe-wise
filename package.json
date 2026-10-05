@@ -1,0 +1,17 @@
+{
+  "name": "pi-vibe-wise",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Pi package wrapper for the vibe-wise package living in ./vibe-wise (git installs read the repo root).",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./vibe-wise/extensions/index.ts"
+    ],
+    "skills": [
+      "./vibe-wise/skills"
+    ]
+  }
+}
